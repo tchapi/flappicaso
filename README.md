@@ -1,2 +1,5 @@
 # flappicaso
-A little flappy-bird like game for the μLCD-32PT (with a PICASO chip)
+
+A little Flappy-bird like game for the μLCD-32PT (with a _PICASO_ chip, hence the pun, ehe)
+
+See the article [https://www.foobarflies.io/throwback-thursday-ulcd-32pt-gen1](here).

@@ -1,0 +1,371 @@
+#platform "uLCD-32PT_GFX2"
+#inherit "4DGL_16bitColours.fnc"
+
+#CONST
+    XBIRD 50
+    JUMP_HEIGHT 14
+    JUMP_SPEED 10
+    DOWN_SPEED_FACTOR 10
+    SCROLL_SPEED 1
+    UP_SPEED_FACTOR 1.3
+    GRASS_HEIGHT 16
+    TUBE_WIDTH 24
+    TUBE_ENTRY_SUPP_WIDTH 2
+    TUBE_ENTRY_HEIGHT 16
+    TUBE_SPACE 120
+    MINIMUM_DIFF 100
+    MAX_SCREEN_X 320
+    MAX_SCREEN_Y 240
+    INITIAL_TUBE_1_POS MAX_SCREEN_X
+    INITIAL_TUBE_1_HEIGHT  120
+    INITIAL_TUBE_2_POS MAX_SCREEN_X + 180
+    INITIAL_TUBE_2_HEIGHT  180
+    BACKGROUND_COLOR 0x7639
+    TUBE_COLOR_MAIN 0x6DA0
+    TUBE_COLOR_LIGHT 0xCFEC
+    TUBE_COLOR_DARK 0x53A1
+#END
+
+var yBird; // The actual bird position
+var yTargetBird; // The target position
+
+var score := 0;
+var bestScore := -1;
+var scoreFileHandle;
+
+var counter := 0;
+var state;
+var debounce;
+var gameState := 0;
+
+var obstacles[6];
+var fallingIteration := 0;
+
+
+func detectCollisions()
+    // Hit the bottom
+    if (yBird > MAX_SCREEN_Y - 9 - GRASS_HEIGHT) gameState := 2;
+
+    // Or the tubes
+    var ind;
+    for(ind := 0; ind < 6; ind := ind + 2)
+        if (obstacles[ind] > 0)
+            if ((obstacles[ind] - TUBE_WIDTH - TUBE_ENTRY_SUPP_WIDTH < XBIRD) && (obstacles[ind] + TUBE_ENTRY_SUPP_WIDTH > XBIRD))
+                if (yBird > obstacles[ind+1] - TUBE_ENTRY_HEIGHT || yBird < obstacles[ind+1] - TUBE_SPACE + TUBE_ENTRY_HEIGHT)
+                    gameState := 2;
+                endif
+            endif
+        endif
+    next
+endfunc
+
+func calcBirdPosition()
+    gfx_CircleFilled(XBIRD, yBird, 9, BACKGROUND_COLOR); // Erase
+    if (yTargetBird < yBird)
+      // Jumping in progress
+      yBird := yBird - MAX(1, (yBird - yTargetBird)/UP_SPEED_FACTOR);
+      fallingIteration := 0;
+    else
+      fallingIteration++;
+      yTargetBird := MAX_SCREEN_Y;
+      yBird := yBird + fallingIteration/DOWN_SPEED_FACTOR;
+    endif
+
+    // Body
+    gfx_RectangleFilled(XBIRD - 4, yBird - 5,XBIRD + 1, yBird, 0xFFE0);
+    gfx_RectangleFilled(XBIRD - 5, yBird + 1, XBIRD + 1, yBird + 3, ORANGE);
+    gfx_PutPixel(XBIRD - 3, yBird - 5, WHITE);
+    gfx_PutPixel(XBIRD - 4, yBird - 5, WHITE);
+    gfx_Hline(yBird - 6, XBIRD - 2, XBIRD, WHITE);
+    gfx_Hline(yBird - 7, XBIRD - 2, XBIRD + 3, BLACK);
+    gfx_Hline(yBird - 6, XBIRD - 4, XBIRD - 3, BLACK);
+    gfx_PutPixel(XBIRD - 5, yBird - 5, BLACK);
+
+    // Eye
+    gfx_PutPixel(XBIRD + 1, yBird - 2, BLACK);
+    gfx_PutPixel(XBIRD + 1, yBird - 6, BLACK);
+    gfx_Vline(XBIRD, yBird - 3, yBird - 5, BLACK);
+    gfx_Vline(XBIRD + 1, yBird - 3, yBird - 5, WHITE);
+    gfx_RectangleFilled(XBIRD + 2, yBird - 6, XBIRD + 4, yBird - 2, WHITE);
+    gfx_Vline(XBIRD + 5, yBird - 2, yBird - 4, WHITE);
+    gfx_Vline(XBIRD + 6, yBird - 2, yBird - 4, BLACK);
+    gfx_Vline(XBIRD + 4, yBird - 3, yBird - 4, BLACK); // Pupil
+    gfx_PutPixel(XBIRD + 5, yBird - 5, BLACK);
+    gfx_PutPixel(XBIRD + 4, yBird - 6, BLACK);
+
+    // Mouth
+    gfx_Hline( yBird - 1, XBIRD + 2, XBIRD + 7, BLACK);
+    gfx_Hline( yBird,     XBIRD + 2, XBIRD + 7, RED);
+    gfx_Hline( yBird + 1, XBIRD + 2, XBIRD + 7, BLACK);
+    gfx_Hline( yBird + 2, XBIRD + 2, XBIRD + 6, RED);
+    gfx_Hline( yBird + 3, XBIRD + 2, XBIRD + 6, BLACK);
+    gfx_PutPixel(XBIRD + 8, yBird, BLACK);
+    gfx_PutPixel(XBIRD + 1, yBird, BLACK);
+    gfx_PutPixel(XBIRD, yBird + 1, BLACK);
+    gfx_PutPixel(XBIRD + 1, yBird + 1, RED);
+    gfx_PutPixel(XBIRD + 1, yBird + 2, BLACK);
+    gfx_PutPixel(XBIRD + 7, yBird + 2, BLACK);
+
+    // bottom lines
+    gfx_Hline( yBird + 3, XBIRD - 5, XBIRD - 4, BLACK);
+    gfx_Hline( yBird + 4, XBIRD - 3, XBIRD + 1, BLACK);
+    gfx_PutPixel(XBIRD - 6, yBird + 2, BLACK);
+
+    if (counter % 10 > 5)
+        // Wing up
+        gfx_RectangleFilled(XBIRD - 7, yBird - 3, XBIRD - 3, yBird, WHITE);
+        gfx_Hline(yBird, XBIRD - 6, XBIRD - 4, 0xFFE0);
+        gfx_PutPixel(XBIRD - 7, yBird - 1, 0xFFE0);
+        gfx_PutPixel(XBIRD - 3, yBird - 1, 0xFFE0);
+        gfx_Hline(yBird - 4, XBIRD - 7, XBIRD - 4, BLACK);
+        gfx_Vline(XBIRD - 8, yBird - 3, yBird - 1, BLACK);
+        gfx_Vline(XBIRD - 2, yBird - 2, yBird - 1, BLACK);
+        gfx_PutPixel(XBIRD - 7, yBird, BLACK);
+        gfx_PutPixel(XBIRD - 3, yBird, BLACK);
+        gfx_PutPixel(XBIRD - 3, yBird - 3, BLACK);
+        gfx_Hline(yBird + 1, XBIRD - 6, XBIRD - 4, BLACK); // bottom of wing
+    else
+        // Wing down
+        gfx_RectangleFilled(XBIRD - 6, yBird - 3, XBIRD - 5, yBird - 2, 0xFFE0);
+        gfx_PutPixel(XBIRD - 5, yBird - 4, WHITE);
+        gfx_PutPixel(XBIRD - 6, yBird - 4, BLACK);
+        gfx_Vline(XBIRD - 7, yBird - 3, yBird - 2, BLACK);
+        gfx_RectangleFilled(XBIRD - 7, yBird, XBIRD - 4, yBird + 2, WHITE);
+        gfx_Hline(yBird - 1, XBIRD - 7, XBIRD - 3, BLACK);
+        gfx_PutPixel(XBIRD - 2, yBird, BLACK);
+        gfx_PutPixel(XBIRD - 3, yBird + 1, BLACK);
+        gfx_PutPixel(XBIRD - 4, yBird + 2, BLACK);
+        gfx_Vline(XBIRD - 8, yBird, yBird + 2, BLACK);
+        gfx_PutPixel(XBIRD - 7, yBird, 0xFFE0);
+        gfx_PutPixel(XBIRD - 5, yBird + 2, 0xFFE0);
+        gfx_Hline(yBird + 3, XBIRD - 7, XBIRD - 4, BLACK);
+    endif
+
+    counter++;
+endfunc
+
+func drawTubeAt(var LeftBottomX, var BottomY, var TopY, var Width)
+
+    var RightBottomX, NewLeftBottomX;
+
+    RightBottomX := LeftBottomX + Width;
+
+        if (RightBottomX < MAX_SCREEN_X)
+            // We don't need to erase everything on screen, just one pixel right
+            gfx_Rectangle(RightBottomX, BottomY, RightBottomX, TopY, BACKGROUND_COLOR); // erase
+        else
+            gfx_RectangleFilled(LeftBottomX - 1, BottomY, RightBottomX, TopY, BACKGROUND_COLOR); // erase
+        endif
+
+        NewLeftBottomX := LeftBottomX - SCROLL_SPEED;
+
+        if (RightBottomX < MAX_SCREEN_X)
+            // Just one pixel left (same)
+            gfx_Rectangle(NewLeftBottomX, BottomY, NewLeftBottomX + 4, TopY, TUBE_COLOR_MAIN); // redraw
+        else
+            gfx_RectangleFilled(NewLeftBottomX, BottomY, RightBottomX - 1, TopY, TUBE_COLOR_MAIN); // redraw
+        endif
+
+        // Light ray left (3 pixels)
+        gfx_RectangleFilled(NewLeftBottomX,BottomY,NewLeftBottomX + 3, TopY, TUBE_COLOR_LIGHT);
+        gfx_Rectangle(NewLeftBottomX,BottomY,NewLeftBottomX,TopY, WHITE);
+
+        // Dark ray right (2 pixels)
+        gfx_RectangleFilled(RightBottomX-3,BottomY,RightBottomX-2,TopY, TUBE_COLOR_DARK);
+
+        // Black boundary
+        if (BottomY == 0) BottomY := -2;
+        gfx_Rectangle(NewLeftBottomX - 1, BottomY, RightBottomX - 1,TopY, BLACK); // redraw
+endfunc
+
+func calcObstacles()
+    var ind, MAX_X;
+    for(ind := 0; ind < 6; ind := ind + 2)
+        if (obstacles[ind] <= - TUBE_ENTRY_SUPP_WIDTH - 1)
+         MAX_X := MAX(obstacles[0], MAX(obstacles[2], obstacles[4]));
+         // Create a new obstacle here
+         obstacles[ind] := MAX(MAX_SCREEN_X + TUBE_WIDTH, MAX_X + MINIMUM_DIFF + TUBE_WIDTH + ABS(RAND() % MAX_SCREEN_X)); // put offscreen
+         obstacles[ind+1] := 80 + ABS(RAND() % (MAX_SCREEN_Y - TUBE_SPACE    - GRASS_HEIGHT - 40));
+         continue;
+        endif
+
+        // Bottom
+        drawTubeAt(obstacles[ind] - TUBE_WIDTH, MAX_SCREEN_Y - GRASS_HEIGHT + 1, obstacles[ind+1], TUBE_WIDTH);
+        drawTubeAt(obstacles[ind] - TUBE_WIDTH - TUBE_ENTRY_SUPP_WIDTH, obstacles[ind+1], obstacles[ind+1] - TUBE_ENTRY_HEIGHT, TUBE_WIDTH + 2*TUBE_ENTRY_SUPP_WIDTH);
+        // Top
+        drawTubeAt(obstacles[ind] - TUBE_WIDTH, 0, obstacles[ind+1] - TUBE_SPACE, TUBE_WIDTH);
+        drawTubeAt(obstacles[ind] - TUBE_WIDTH - TUBE_ENTRY_SUPP_WIDTH, obstacles[ind+1] - TUBE_SPACE + TUBE_ENTRY_HEIGHT, obstacles[ind+1] - TUBE_SPACE, TUBE_WIDTH + 2*TUBE_ENTRY_SUPP_WIDTH);
+
+        // Black line at the bottom
+        gfx_RectangleFilled(0, MAX_SCREEN_Y - GRASS_HEIGHT + 1 , MAX_SCREEN_X, MAX_SCREEN_Y - GRASS_HEIGHT + 1, BLACK);
+
+        // Move obstacle to the left
+        obstacles[ind] := obstacles[ind] - SCROLL_SPEED;
+
+        if (obstacles[ind] == XBIRD) score++;
+        displayScore();
+    next
+endfunc
+
+func displayLaunchScreen()
+    gfx_BGcolour(BLACK);
+    var text_y := MAX_SCREEN_Y/2 + 20;
+    var line_h := 20;
+    gfx_Cls();
+
+    // Best score line
+    if (bestScore > -1)
+        gfx_MoveTo(110, MAX_SCREEN_Y/2 - 30);
+        txt_FGcolour(WHITE);
+        txt_Set(TEXT_WIDTH, 3);
+        txt_Set(TEXT_HEIGHT, 3);
+        txt_Set(TEXT_BOLD, 0);
+        txt_Set(TEXT_OPACITY, TRANSPARENT);
+        txt_FontID(0);
+        putnum(DECZ, bestScore);
+        displayShadowedTextAt("Best score", 58, MAX_SCREEN_Y/2 - 60, WHITE, RED);
+    endif
+
+    txt_Set(TEXT_WIDTH, 2);
+    txt_Set(TEXT_HEIGHT, 2);
+    txt_Set(TEXT_BOLD, 1);
+    txt_Set(TEXT_OPACITY, TRANSPARENT);
+    txt_FontID(0);
+    displayShadowedTextAt("Touch anywhere", 60, text_y, WHITE, TUBE_COLOR_MAIN);
+    displayShadowedTextAt("to start", 108, text_y + line_h, WHITE, TUBE_COLOR_MAIN);
+
+    // RESET
+    txt_Set(TEXT_BOLD, 0);
+    txt_Set(TEXT_OPACITY, OPAQUE);
+    txt_Set(TEXT_HIGHLIGHT, BACKGROUND_COLOR);
+endfunc
+
+func displayShadowedTextAt(var text, var X, var Y, var backColor, var frontColor)
+    gfx_MoveTo(X, Y);
+    txt_FGcolour(backColor);
+    putstr(text);
+    gfx_MoveTo(X + 1, Y + 1);
+    txt_FGcolour(frontColor);
+    putstr(text);
+endfunc
+
+func displayScore()
+    gfx_MoveTo(4, 4);
+    txt_FGcolour(WHITE);
+    txt_Set(TEXT_WIDTH, 2);
+    txt_Set(TEXT_HEIGHT, 2);
+    txt_Set(TEXT_BOLD, 0);
+    txt_FontID(0);
+    putnum(DECZ, score);
+endfunc
+
+func setInitialState()
+    gfx_Cls();
+    gfx_RectangleFilled(0, MAX_SCREEN_Y, MAX_SCREEN_X, MAX_SCREEN_Y - GRASS_HEIGHT + 6, 0xDEC9);
+    gfx_RectangleFilled(0, MAX_SCREEN_Y - GRASS_HEIGHT + 6, MAX_SCREEN_X, MAX_SCREEN_Y - GRASS_HEIGHT +1, 0x7605);
+    gfx_RectangleFilled(0, MAX_SCREEN_Y - GRASS_HEIGHT +1 , MAX_SCREEN_X, MAX_SCREEN_Y - GRASS_HEIGHT + 1, BLACK);
+    *obstacles := [0,0, INITIAL_TUBE_1_POS, INITIAL_TUBE_1_HEIGHT, INITIAL_TUBE_2_POS, INITIAL_TUBE_2_HEIGHT];
+endfunc
+
+func retrieveScoreFromStorage()
+    var c;
+    if(file_Mount())
+        //file_Erase("score.txt");
+        if (file_Exists("score.txt"))
+            scoreFileHandle := file_Open("score.txt", 'r');
+            bestScore := file_GetW(scoreFileHandle);
+        else
+            scoreFileHandle := file_Open("score.txt", 'w'); // Let's create it and put a "0001" best score in it
+            bestScore := 1;
+            file_PutW(bestScore, scoreFileHandle);
+        endif
+        file_Close(scoreFileHandle);
+    endif
+endfunc
+
+func saveScoreToStorage()
+    bestScore := score;
+    if (file_Mount() && bestScore < score)
+        scoreFileHandle := file_Open("score.txt", 'w');
+        file_PutW(bestScore, scoreFileHandle);
+        file_Close(scoreFileHandle);
+    endif
+endfunc
+
+func displayScoreScreen()
+    gfx_BGcolour(BLACK);
+    gfx_Cls();
+
+    gfx_MoveTo(110, MAX_SCREEN_Y/2 - 30);
+    txt_FGcolour(WHITE);
+    txt_Set(TEXT_WIDTH, 3);
+    txt_Set(TEXT_HEIGHT, 3);
+    txt_Set(TEXT_BOLD, 0);
+    txt_Set(TEXT_OPACITY, TRANSPARENT);
+    txt_FontID(0);
+    putnum(DECZ, score);
+
+    if (bestScore < score)
+        displayShadowedTextAt("GOOD JOB !", 64, 50, WHITE, YELLOW);
+    endif
+
+    var text_y := MAX_SCREEN_Y/2 + 30;
+    var line_h := 20;
+
+    txt_Set(TEXT_WIDTH, 2);
+    txt_Set(TEXT_HEIGHT, 2);
+    txt_Set(TEXT_BOLD, 1);
+    txt_FontID(0);
+    displayShadowedTextAt("Touch anywhere", 60, text_y, WHITE, BLUE);
+    displayShadowedTextAt("to retry", 108, text_y + line_h, WHITE, BLUE);
+
+endfunc
+
+func main()
+    gfx_Set(SCREEN_MODE,LANDSCAPE);
+    touch_Set(TOUCH_ENABLE);
+    SEED(1000);
+
+init:
+    retrieveScoreFromStorage();
+    displayLaunchScreen();
+    while(touch_Get(TOUCH_STATUS) !=  TOUCH_PRESSED); // wait for first touch
+
+start:
+    gfx_BGcolour(BACKGROUND_COLOR);
+    yBird := MAX_SCREEN_Y / 2;
+    yTargetBird := MAX_SCREEN_Y;
+    gameState := 1;
+    setInitialState();
+    score := 0;
+    var t, t_diff;
+
+    while (gameState != 2) // 2 = game over
+        t := sys_T();
+
+        debounce := 0;
+        state := NOTOUCH;
+        repeat
+            state :=  state + touch_Get(TOUCH_STATUS);
+            debounce++;
+        until(debounce >= 20);
+
+        if (state > 1)
+          yTargetBird := MAX(- JUMP_HEIGHT, yBird - JUMP_HEIGHT);
+        endif
+
+        detectCollisions();
+        calcObstacles();
+        calcBirdPosition();
+
+        t_diff := MAX(0, 10 - ABS(sys_T() - t)); // 10 ms max between each frame
+
+        pause(t_diff);
+    wend
+
+final:
+    displayScoreScreen();
+    saveScoreToStorage();
+    while(touch_Get(TOUCH_STATUS) !=  TOUCH_PRESSED); // wait for last touch
+    goto start;
+endfunc
